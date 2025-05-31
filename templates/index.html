@@ -4,6 +4,102 @@
     <title>ComfyUI Output Images</title>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css">
+    <style>
+        /* Basic styling for the new buttons/forms */
+        .crud-section {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #222;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .crud-section h2 {
+            color: #fff;
+            margin-bottom: 20px;
+        }
+        .crud-section button {
+            background-color: #4CAF50; /* Green */
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+            transition: background-color 0.3s ease;
+        }
+        .crud-section button:hover {
+            background-color: #45a049;
+        }
+        .crud-section input[type="text"], .crud-section input[type="file"] {
+            padding: 8px;
+            margin: 5px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #444;
+            color: #eee;
+        }
+        .api-response {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #1a1a1a;
+            border-radius: 5px;
+            white-space: pre-wrap; /* Preserve whitespace and wrap text */
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            color: #00ff00; /* Green text for console-like output */
+            border: 1px solid #333;
+        }
+        .api-response.error {
+            color: #ff3333; /* Red text for errors */
+        }
+        .crud-form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 15px;
+            border: 1px solid #555;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .crud-form label {
+            margin-bottom: 5px;
+            color: #ddd;
+        }
+
+        /* Styles for selected image display */
+        .selected-image-display {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #1a1a1a;
+            border-radius: 5px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .selected-image-display img {
+            max-width: 300px;
+            max-height: 300px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .selected-image-info {
+            color: #eee;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .selected-image-actions input {
+            width: calc(100% - 22px); /* Adjust for padding/border */
+            max-width: 250px; /* Limit input width */
+            margin-bottom: 10px;
+        }
+    </style>
 </head>
 <body class="dark-mode">
     <header>
@@ -11,6 +107,45 @@
             <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="ComfyUI Logo">
         </div>
     </header>
+
+    <div class="crud-section">
+        <h2>Image Management API (CRUD)</h2>
+
+        <div class="crud-form">
+            <h3>Upload Image (Create)</h3>
+            <input type="file" id="imageUploadInput" accept=".jpg, .jpeg, .png, .gif">
+            <button onclick="uploadImage()">Upload Image</button>
+        </div>
+
+        <div class="crud-form">
+            <h3>Select Image for Management</h3>
+            <label for="getImageFilename">Filename:</label>
+            <input type="text" id="getImageFilename" placeholder="e.g., my_image.png">
+            <button onclick="getImageDetailsAndShowActions()">Show Action</button>
+            </div>
+
+        <div id="selectedImageContainer" class="selected-image-display" style="display: none;">
+            <h3>Currently Managing: <span id="displayedFilename"></span></h3>
+            <a id="displayedImageLink" data-fancybox="gallery" href="#">
+                <img id="displayedImage" src="#" alt="Selected Image">
+            </a>
+            <div id="selectedImageInfo" class="selected-image-info"></div>
+
+            <div class="selected-image-actions">
+                <h4>Rename Image</h4>
+                <label for="newFilenameForSelected">New Filename:</label>
+                <input type="text" id="newFilenameForSelected" placeholder="e.g., new_name.png">
+                <button onclick="renameSelectedImage()">Rename</button>
+                <hr style="border-color: #555; margin: 15px 0;">
+                <h4>Delete Image</h4>
+                <button onclick="deleteSelectedImage()" style="background-color: #f44336;">Delete</button>
+            </div>
+        </div>
+
+
+        <h3>API Response:</h3>
+        <pre id="apiResponse" class="api-response"></pre>
+    </div>
     <ul class="image-list">
         {% for thumbnail in current_thumbnails %}
             <li>
@@ -40,5 +175,187 @@
     </footer>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js"></script>
+    <script>
+        // Global variable to store the currently selected filename
+        let selectedImageFilename = null;
+
+        // Helper function to display API responses
+        function displayResponse(data, isError = false) {
+            const responseElement = document.getElementById('apiResponse');
+            responseElement.textContent = JSON.stringify(data, null, 2);
+            responseElement.classList.remove('error');
+            if (isError) {
+                responseElement.classList.add('error');
+            }
+        }
+
+        // C (Create) - Upload Image
+        async function uploadImage() {
+            const fileInput = document.getElementById('imageUploadInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                displayResponse({ error: "Please select a file to upload." }, true);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {
+                const response = await fetch('/api/images', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    displayResponse(data);
+                    // Optionally, refresh the page to see the new image
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    displayResponse(data, true);
+                }
+            } catch (error) {
+                displayResponse({ error: `Network error: ${error.message}` }, true);
+            }
+        }
+
+        // R (Read) - Get all images
+        async function getAllImages() {
+            try {
+                const response = await fetch('/api/images');
+                const data = await response.json();
+                if (response.ok) {
+                    displayResponse(data);
+                } else {
+                    displayResponse(data, true);
+                }
+            } catch (error) {
+                displayResponse({ error: `Network error: ${error.message}` }, true);
+            }
+        }
+
+        // R (Read) - Get specific image details AND show update/delete actions
+        async function getImageDetailsAndShowActions() {
+            const filename = document.getElementById('getImageFilename').value;
+            if (!filename) {
+                // Clear any previous error messages if input is empty
+                displayResponse({ info: "Enter a filename to view and manage." });
+                document.getElementById('selectedImageContainer').style.display = 'none';
+                return;
+            }
+            selectedImageFilename = filename; // Store the selected filename globally
+
+            try {
+                const response = await fetch(`/api/images/${filename}`);
+                const data = await response.json();
+                const imageContainer = document.getElementById('selectedImageContainer');
+                const displayedImage = document.getElementById('displayedImage');
+                const displayedImageLink = document.getElementById('displayedImageLink');
+                const displayedFilename = document.getElementById('displayedFilename');
+                const selectedImageInfo = document.getElementById('selectedImageInfo');
+                const newFilenameInput = document.getElementById('newFilenameForSelected');
+
+                if (response.ok) {
+                    // Removed: displayResponse(data); (to avoid showing raw JSON details here)
+                    imageContainer.style.display = 'block'; // Show the image display area
+
+                    displayedFilename.textContent = data.filename;
+                    displayedImage.src = data.thumbnail_url; // Use thumbnail for display
+                    displayedImage.alt = data.filename;
+                    displayedImageLink.href = data.url; // Link to full image
+
+                    const sizeKB = (data.size_bytes / 1024).toFixed(2);
+                    const lastModifiedDate = new Date(data.last_modified * 1000).toLocaleString();
+                    selectedImageInfo.innerHTML = `
+                        <strong>Size:</strong> ${sizeKB} KB<br>
+                        <strong>Dimensions:</strong> ${data.width}x${data.height} pixels<br>
+                        <strong>Format:</strong> ${data.format}<br>
+                        <strong>Last Modified:</strong> ${lastModifiedDate}
+                    `;
+                    newFilenameInput.value = data.filename; // Pre-fill rename field
+                    displayResponse({ message: `Image '${filename}' loaded for management.` }); // Informative message
+                } else {
+                    displayResponse(data, true); // Still show error response
+                    imageContainer.style.display = 'none'; // Hide if image not found
+                }
+            } catch (error) {
+                displayResponse({ error: `Network error: ${error.message}` }, true);
+                document.getElementById('selectedImageContainer').style.display = 'none';
+            }
+        }
+
+        // U (Update) - Rename Selected Image
+        async function renameSelectedImage() {
+            if (!selectedImageFilename) {
+                displayResponse({ error: "No image selected for renaming. Please use 'Select Image' first." }, true);
+                return;
+            }
+
+            const newFilename = document.getElementById('newFilenameForSelected').value;
+            if (!newFilename) {
+                displayResponse({ error: "New filename cannot be empty." }, true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/images/${selectedImageFilename}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ new_filename: newFilename })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    displayResponse(data);
+                    // Update the displayed filename and global variable
+                    selectedImageFilename = newFilename;
+                    document.getElementById('displayedFilename').textContent = newFilename;
+                    document.getElementById('newFilenameForSelected').value = newFilename; // Update input field
+                    // Re-fetch gallery to update thumbnails
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    displayResponse(data, true);
+                }
+            } catch (error) {
+                displayResponse({ error: `Network error: ${error.message}` }, true);
+            }
+        }
+
+        // D (Delete) - Delete Selected Image
+        async function deleteSelectedImage() {
+            if (!selectedImageFilename) {
+                displayResponse({ error: "No image selected for deletion. Please use 'Select Image' first." }, true);
+                return;
+            }
+            if (!confirm(`Are you sure you want to delete ${selectedImageFilename}? This action cannot be undone.`)) {
+                return; // User cancelled
+            }
+
+            try {
+                const response = await fetch(`/api/images/${selectedImageFilename}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    displayResponse(data);
+                    // Hide the display area and clear selected image
+                    document.getElementById('selectedImageContainer').style.display = 'none';
+                    selectedImageFilename = null;
+                    document.getElementById('getImageFilename').value = ''; // Clear input
+                    // Refresh the page to remove the deleted image from the gallery
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    displayResponse(data, true);
+                }
+            } catch (error) {
+                displayResponse({ error: `Network error: ${error.message}` }, true);
+            }
+        }
+    </script>
 </body>
 </html>
